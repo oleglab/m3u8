@@ -342,22 +342,24 @@ func (p *MediaPlaylist) Encode() *bytes.Buffer {
 		p.buf.WriteString("#EXT-X-KEY:")
 		p.buf.WriteString("METHOD=")
 		p.buf.WriteString(p.Key.Method)
-		p.buf.WriteString(",URI=\"")
-		p.buf.WriteString(p.Key.URI)
-		p.buf.WriteRune('"')
-		if p.Key.IV != "" {
-			p.buf.WriteString(",IV=")
-			p.buf.WriteString(p.Key.IV)
-		}
-		if p.Key.Keyformat != "" {
-			p.buf.WriteString(",KEYFORMAT=\"")
-			p.buf.WriteString(p.Key.Keyformat)
+		if p.Key.Method != "NONE" {
+			p.buf.WriteString(",URI=\"")
+			p.buf.WriteString(p.Key.URI)
 			p.buf.WriteRune('"')
-		}
-		if p.Key.Keyformatversions != "" {
-			p.buf.WriteString(",KEYFORMATVERSIONS=\"")
-			p.buf.WriteString(p.Key.Keyformatversions)
-			p.buf.WriteRune('"')
+			if p.Key.IV != "" {
+				p.buf.WriteString(",IV=")
+				p.buf.WriteString(p.Key.IV)
+			}
+			if p.Key.Keyformat != "" {
+				p.buf.WriteString(",KEYFORMAT=\"")
+				p.buf.WriteString(p.Key.Keyformat)
+				p.buf.WriteRune('"')
+			}
+			if p.Key.Keyformatversions != "" {
+				p.buf.WriteString(",KEYFORMATVERSIONS=\"")
+				p.buf.WriteString(p.Key.Keyformatversions)
+				p.buf.WriteRune('"')
+			}
 		}
 		p.buf.WriteRune('\n')
 	}
@@ -479,47 +481,88 @@ func (p *MediaPlaylist) Encode() *bytes.Buffer {
 			i++
 		}
 		if seg.SCTE != nil {
-			p.buf.WriteString("#EXT-SCTE35:")
-			p.buf.WriteString("CUE=\"")
-			p.buf.WriteString(seg.SCTE.Cue)
-			p.buf.WriteRune('"')
-			if seg.SCTE.ID != "" {
-				p.buf.WriteString(",ID=\"")
-				p.buf.WriteString(seg.SCTE.ID)
+			switch seg.SCTE.Syntax {
+			case SCTE35_67_2014:
+				p.buf.WriteString("#EXT-SCTE35:")
+				p.buf.WriteString("CUE=\"")
+				p.buf.WriteString(seg.SCTE.Cue)
 				p.buf.WriteRune('"')
+				if seg.SCTE.ID != "" {
+					p.buf.WriteString(",ID=\"")
+					p.buf.WriteString(seg.SCTE.ID)
+					p.buf.WriteRune('"')
+				}
+				if seg.SCTE.Time != 0 {
+					p.buf.WriteString(",TIME=")
+					p.buf.WriteString(strconv.FormatFloat(seg.SCTE.Time, 'f', -1, 64))
+				}
+				p.buf.WriteRune('\n')
+			case SCTE35_OATCLS:
+				switch seg.SCTE.CueType {
+				case SCTE35Cue_Start:
+					p.buf.WriteString("#EXT-OATCLS-SCTE35:")
+					p.buf.WriteString(seg.SCTE.Cue)
+					p.buf.WriteRune('\n')
+					p.buf.WriteString("#EXT-X-CUE-OUT:")
+					p.buf.WriteString(strconv.FormatFloat(seg.SCTE.Time, 'f', -1, 64))
+					p.buf.WriteRune('\n')
+				case SCTE35Cue_Mid:
+					p.buf.WriteString("#EXT-X-CUE-OUT-CONT:")
+					p.buf.WriteString("ElapsedTime=")
+					p.buf.WriteString(strconv.FormatFloat(seg.SCTE.Elapsed, 'f', -1, 64))
+					p.buf.WriteString(",Duration=")
+					p.buf.WriteString(strconv.FormatFloat(seg.SCTE.Time, 'f', -1, 64))
+					p.buf.WriteString(",SCTE35=")
+					p.buf.WriteString(seg.SCTE.Cue)
+					p.buf.WriteRune('\n')
+				case SCTE35Cue_End:
+					p.buf.WriteString("#EXT-X-CUE-IN")
+					p.buf.WriteRune('\n')
+				}
 			}
-			if seg.SCTE.Time != 0 {
-				p.buf.WriteString(",TIME=")
-				p.buf.WriteString(strconv.FormatFloat(seg.SCTE.Time, 'f', -1, 64))
-			}
-			p.buf.WriteRune('\n')
 		}
 		// check for key change
 		if seg.Key != nil && p.Key != seg.Key {
 			p.buf.WriteString("#EXT-X-KEY:")
 			p.buf.WriteString("METHOD=")
 			p.buf.WriteString(seg.Key.Method)
-			p.buf.WriteString(",URI=\"")
-			p.buf.WriteString(seg.Key.URI)
-			p.buf.WriteRune('"')
-			if seg.Key.IV != "" {
-				p.buf.WriteString(",IV=")
-				p.buf.WriteString(seg.Key.IV)
-			}
-			if seg.Key.Keyformat != "" {
-				p.buf.WriteString(",KEYFORMAT=\"")
-				p.buf.WriteString(seg.Key.Keyformat)
+			if seg.Key.Method != "NONE" {
+				p.buf.WriteString(",URI=\"")
+				p.buf.WriteString(seg.Key.URI)
 				p.buf.WriteRune('"')
-			}
-			if seg.Key.Keyformatversions != "" {
-				p.buf.WriteString(",KEYFORMATVERSIONS=\"")
-				p.buf.WriteString(seg.Key.Keyformatversions)
-				p.buf.WriteRune('"')
+				if seg.Key.IV != "" {
+					p.buf.WriteString(",IV=")
+					p.buf.WriteString(seg.Key.IV)
+				}
+				if seg.Key.Keyformat != "" {
+					p.buf.WriteString(",KEYFORMAT=\"")
+					p.buf.WriteString(seg.Key.Keyformat)
+					p.buf.WriteRune('"')
+				}
+				if seg.Key.Keyformatversions != "" {
+					p.buf.WriteString(",KEYFORMATVERSIONS=\"")
+					p.buf.WriteString(seg.Key.Keyformatversions)
+					p.buf.WriteRune('"')
+				}
 			}
 			p.buf.WriteRune('\n')
 		}
 		if seg.Discontinuity {
 			p.buf.WriteString("#EXT-X-DISCONTINUITY\n")
+		}
+		// ignore segment Map if default playlist Map is present
+		if p.Map == nil && seg.Map != nil {
+			p.buf.WriteString("#EXT-X-MAP:")
+			p.buf.WriteString("URI=\"")
+			p.buf.WriteString(seg.Map.URI)
+			p.buf.WriteRune('"')
+			if seg.Map.Limit > 0 {
+				p.buf.WriteString(",BYTERANGE=")
+				p.buf.WriteString(strconv.FormatInt(seg.Map.Limit, 10))
+				p.buf.WriteRune('@')
+				p.buf.WriteString(strconv.FormatInt(seg.Map.Offset, 10))
+			}
+			p.buf.WriteRune('\n')
 		}
 		if !seg.ProgramDateTime.IsZero() {
 			p.buf.WriteString("#EXT-X-PROGRAM-DATE-TIME:")
@@ -606,9 +649,8 @@ func (p *MediaPlaylist) SetDefaultKey(method, uri, iv, keyformat, keyformatversi
 	return nil
 }
 
-// Set map appeared once in header of the playlist (pointer to MediaPlaylist.Key).
-// It useful when map not changed during playback.
-// Set tag for the whole list.
+// Set default Media Initialization Section values for playlist (pointer to MediaPlaylist.Map).
+// Set EXT-X-MAP tag for the whole playlist.
 func (p *MediaPlaylist) SetDefaultMap(uri string, limit, offset int64) {
 	version(&p.ver, 5) // due section 4
 	p.Map = &Map{uri, limit, offset}
@@ -638,7 +680,7 @@ func (p *MediaPlaylist) SetKey(method, uri, iv, keyformat, keyformatversions str
 	return nil
 }
 
-// Set encryption key for the current segment of media playlist (pointer to Segment.Key)
+// Set map for the current segment of media playlist (pointer to Segment.Map)
 func (p *MediaPlaylist) SetMap(uri string, limit, offset int64) error {
 	if p.count == 0 {
 		return errors.New("playlist is empty")
@@ -659,11 +701,19 @@ func (p *MediaPlaylist) SetRange(limit, offset int64) error {
 	return nil
 }
 
+// SetSCTE sets the SCTE cue format for the current media segment.
+//
+// Deprecated: Use SetSCTE35 instead.
 func (p *MediaPlaylist) SetSCTE(cue string, id string, time float64) error {
+	return p.SetSCTE35(&SCTE{Syntax: SCTE35_67_2014, Cue: cue, ID: id, Time: time})
+}
+
+// SetSCTE35 sets the SCTE cue format for the current media segment
+func (p *MediaPlaylist) SetSCTE35(scte35 *SCTE) error {
 	if p.count == 0 {
 		return errors.New("playlist is empty")
 	}
-	p.Segments[p.last()].SCTE = &SCTE{cue, id, time}
+	p.Segments[p.last()].SCTE = scte35
 	return nil
 }
 

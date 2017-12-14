@@ -11,6 +11,7 @@ package m3u8
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"reflect"
@@ -219,6 +220,57 @@ func TestDecodeMediaPlaylist(t *testing.T) {
 	//fmt.Println(p.Encode().String()), stream.Name}
 }
 
+func TestDecodeMediaPlaylistExtInfNonStrict2(t *testing.T) {
+	header := `#EXTM3U
+#EXT-X-TARGETDURATION:10
+#EXT-X-VERSION:3
+#EXT-X-MEDIA-SEQUENCE:0
+%s
+`
+
+	tests := []struct {
+		strict      bool
+		extInf      string
+		wantError   bool
+		wantSegment *MediaSegment
+	}{
+		// strict mode on
+		{true, "#EXTINF:10.000,", false, &MediaSegment{Duration: 10.0, Title: ""}},
+		{true, "#EXTINF:10.000,Title", false, &MediaSegment{Duration: 10.0, Title: "Title"}},
+		{true, "#EXTINF:10.000,Title,Track", false, &MediaSegment{Duration: 10.0, Title: "Title,Track"}},
+		{true, "#EXTINF:invalid,", true, nil},
+		{true, "#EXTINF:10.000", true, nil},
+
+		// strict mode off
+		{false, "#EXTINF:10.000,", false, &MediaSegment{Duration: 10.0, Title: ""}},
+		{false, "#EXTINF:10.000,Title", false, &MediaSegment{Duration: 10.0, Title: "Title"}},
+		{false, "#EXTINF:10.000,Title,Track", false, &MediaSegment{Duration: 10.0, Title: "Title,Track"}},
+		{false, "#EXTINF:invalid,", false, &MediaSegment{Duration: 0.0, Title: ""}},
+		{false, "#EXTINF:10.000", false, &MediaSegment{Duration: 10.0, Title: ""}},
+	}
+
+	for _, test := range tests {
+		p, err := NewMediaPlaylist(1, 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		reader := bytes.NewBufferString(fmt.Sprintf(header, test.extInf))
+		err = p.DecodeFrom(reader, test.strict)
+		if test.wantError {
+			if err == nil {
+				t.Errorf("expected error but have: %v", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !reflect.DeepEqual(p.Segments[0], test.wantSegment) {
+			t.Errorf("\nhave: %+v\nwant: %+v", p.Segments[0], test.wantSegment)
+		}
+	}
+}
+
 func TestDecodeMediaPlaylistWithWidevine(t *testing.T) {
 	f, err := os.Open("sample-playlists/widevine-bitrate.m3u8")
 	if err != nil {
@@ -365,6 +417,31 @@ func TestStrictTimeParse(t *testing.T) {
 		_, err = StrictTimeParse(tstamp.value)
 		if err != nil {
 			t.Errorf("StrictTimeParse Error at %s [%s]: %s", tstamp.name, tstamp.value, err)
+		}
+	}
+}
+
+func TestMediaPlaylistWithOATCLSSCTE35Tag(t *testing.T) {
+	f, err := os.Open("sample-playlists/media-playlist-with-oatcls-scte35.m3u8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := DecodeFrom(bufio.NewReader(f), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pp := p.(*MediaPlaylist)
+
+	expect := map[int]*SCTE{
+		0: {Syntax: SCTE35_OATCLS, CueType: SCTE35Cue_Start, Cue: "/DAlAAAAAAAAAP/wFAUAAAABf+/+ANgNkv4AFJlwAAEBAQAA5xULLA==", Time: 15},
+		1: {Syntax: SCTE35_OATCLS, CueType: SCTE35Cue_Mid, Cue: "/DAlAAAAAAAAAP/wFAUAAAABf+/+ANgNkv4AFJlwAAEBAQAA5xULLA==", Time: 15, Elapsed: 8.844},
+		2: {Syntax: SCTE35_OATCLS, CueType: SCTE35Cue_End},
+	}
+	for i := 0; i < int(pp.Count()); i++ {
+		if !reflect.DeepEqual(pp.Segments[i].SCTE, expect[i]) {
+			t.Errorf("OATCLS SCTE35 segment %v (uri: %v)\ngot: %#v\nexp: %#v",
+				i, pp.Segments[i].URI, pp.Segments[i].SCTE, expect[i],
+			)
 		}
 	}
 }

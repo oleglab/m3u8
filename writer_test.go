@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -186,6 +187,21 @@ func TestOverAddSegmentsToMediaPlaylist(t *testing.T) {
 	}
 }
 
+func TestSetSCTE35(t *testing.T) {
+	p, _ := NewMediaPlaylist(1, 2)
+	scte := &SCTE{Cue: "some cue"}
+	if err := p.SetSCTE35(scte); err == nil {
+		t.Error("SetSCTE35 expected empty playlist error")
+	}
+	_ = p.Append("test01.ts", 10.0, "title")
+	if err := p.SetSCTE35(scte); err != nil {
+		t.Errorf("SetSCTE35 did not expect error: %v", err)
+	}
+	if !reflect.DeepEqual(p.Segments[0].SCTE, scte) {
+		t.Errorf("SetSCTE35\nexp: %#v\ngot: %#v", scte, p.Segments[0].SCTE)
+	}
+}
+
 // Create new media playlist
 // Add segment to media playlist
 // Set SCTE
@@ -282,8 +298,23 @@ func TestSetDefaultKeyForMediaPlaylist(t *testing.T) {
 }
 
 // Create new media playlist
+// Set default map
+func TestSetDefaultMapForMediaPlaylist(t *testing.T) {
+	p, e := NewMediaPlaylist(3, 5)
+	if e != nil {
+		t.Fatalf("Create media playlist failed: %s", e)
+	}
+	p.SetDefaultMap("https://example.com", 1000*1024, 1024*1024)
+
+	expected := `EXT-X-MAP:URI="https://example.com",BYTERANGE=1024000@1048576`
+	if !strings.Contains(p.String(), expected) {
+		t.Fatalf("Media playlist did not contain: %s\nMedia Playlist:\n%v", expected, p.String())
+	}
+}
+
+// Create new media playlist
 // Add segment to media playlist
-// Set map
+// Set map on segment
 func TestSetMapForMediaPlaylist(t *testing.T) {
 	p, e := NewMediaPlaylist(3, 5)
 	if e != nil {
@@ -296,6 +327,45 @@ func TestSetMapForMediaPlaylist(t *testing.T) {
 	e = p.SetMap("https://example.com", 1000*1024, 1024*1024)
 	if e != nil {
 		t.Errorf("Set map to a media playlist failed: %s", e)
+	}
+
+	expected := `EXT-X-MAP:URI="https://example.com",BYTERANGE=1024000@1048576
+#EXTINF:5.000,
+test01.ts`
+	if !strings.Contains(p.String(), expected) {
+		t.Fatalf("Media playlist did not contain: %s\nMedia Playlist:\n%v", expected, p.String())
+	}
+}
+
+// Create new media playlist
+// Set default map
+// Add segment to media playlist
+// Set map on segment (should be ignored when encoding)
+func TestEncodeMediaPlaylistWithDefaultMap(t *testing.T) {
+	p, e := NewMediaPlaylist(3, 5)
+	if e != nil {
+		t.Fatalf("Create media playlist failed: %s", e)
+	}
+	p.SetDefaultMap("https://example.com", 1000*1024, 1024*1024)
+
+	e = p.Append("test01.ts", 5.0, "")
+	if e != nil {
+		t.Errorf("Add 1st segment to a media playlist failed: %s", e)
+	}
+	e = p.SetMap("https://notencoded.com", 1000*1024, 1024*1024)
+	if e != nil {
+		t.Errorf("Set map to segment failed: %s", e)
+	}
+
+	encoded := p.String()
+	expected := `EXT-X-MAP:URI="https://example.com",BYTERANGE=1024000@1048576`
+	if !strings.Contains(encoded, expected) {
+		t.Fatalf("Media playlist did not contain: %s\nMedia Playlist:\n%v", expected, encoded)
+	}
+
+	ignored := `EXT-X-MAP:URI="https://notencoded.com"`
+	if strings.Contains(encoded, ignored) {
+		t.Fatalf("Media playlist contains non default map: %s\nMedia Playlist:\n%v", ignored, encoded)
 	}
 }
 
@@ -357,6 +427,23 @@ func TestEncryptionKeysInMediaPlaylist(t *testing.T) {
 		if *p.Segments[i].Key != *expected {
 			t.Errorf("Key %+v does not match expected %+v", p.Segments[i].Key, expected)
 		}
+	}
+}
+
+func TestEncryptionKeyMethodNoneInMediaPlaylist(t *testing.T) {
+	p, e := NewMediaPlaylist(5, 5)
+	if e != nil {
+		t.Fatalf("Create media playlist failed: %s", e)
+	}
+	p.Append("segment-1.ts", 4, "")
+	p.SetKey("AES-128", "key-uri", "iv", "identity", "1")
+	p.Append("segment-2.ts", 4, "")
+	p.SetKey("NONE", "", "", "", "")
+	expected := `#EXT-X-KEY:METHOD=NONE
+#EXTINF:4.000,
+segment-2.ts`
+	if !strings.Contains(p.String(), expected) {
+		t.Errorf("Manifest %+v did not contain expected %+v", p, expected)
 	}
 }
 
@@ -550,7 +637,10 @@ func TestNewMasterPlaylistWithAlternatives(t *testing.T) {
 	if m.ver != 4 {
 		t.Fatalf("Expected version 4, actual, %d", m.ver)
 	}
-	fmt.Printf("%v\n", m)
+	expected := `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="main",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="english",URI="800/rendition.m3u8"`
+	if !strings.Contains(m.String(), expected) {
+		t.Fatalf("Master playlist did not contain: %s\nMaster Playlist:\n%v", expected, m.String())
+	}
 }
 
 // Create new master playlist supporting CLOSED-CAPTIONS=NONE
@@ -620,7 +710,7 @@ func TestEncodeMasterPlaylistWithExistingQuery(t *testing.T) {
 	}
 	m.Append("chunklist1.m3u8?k1=v1&k2=v2", p, VariantParams{ProgramId: 123, Bandwidth: 1500000, Resolution: "576x480"})
 	m.Args = "k3=v3"
-	if !strings.Contains(m.String(), "chunklist1.m3u8?k1=v1&k2=v2&k3=v3\n") {
+	if !strings.Contains(m.String(), `chunklist1.m3u8?k1=v1&k2=v2&k3=v3`) {
 		t.Errorf("Encode master with existing args failed")
 	}
 }
@@ -662,7 +752,7 @@ func TestEncodeMasterPlaylistWithStreamInfName(t *testing.T) {
 	if m.Variants[0].Name != "HD 960p" {
 		t.Fatalf("Create master with Name in EXT-X-STREAM-INF failed")
 	}
-	if !strings.Contains(m.String(), "NAME=\"HD 960p\"") {
+	if !strings.Contains(m.String(), `NAME="HD 960p"`) {
 		t.Fatalf("Encode master with Name in EXT-X-STREAM-INF failed")
 	}
 }
@@ -764,6 +854,47 @@ func ExampleMasterPlaylist_String() {
 	// chunklist1.m3u8
 	// #EXT-X-STREAM-INF:PROGRAM-ID=123,BANDWIDTH=1500000,RESOLUTION=576x480
 	// chunklist2.m3u8
+}
+
+func ExampleMediaPlaylist_Segments_scte35_oatcls() {
+	f, _ := os.Open("sample-playlists/media-playlist-with-oatcls-scte35.m3u8")
+	p, _, _ := DecodeFrom(bufio.NewReader(f), true)
+	pp := p.(*MediaPlaylist)
+	fmt.Print(pp)
+	// Output:
+	// #EXTM3U
+	// #EXT-X-VERSION:3
+	// #EXT-X-MEDIA-SEQUENCE:0
+	// #EXT-X-TARGETDURATION:10
+	// #EXT-OATCLS-SCTE35:/DAlAAAAAAAAAP/wFAUAAAABf+/+ANgNkv4AFJlwAAEBAQAA5xULLA==
+	// #EXT-X-CUE-OUT:15
+	// #EXTINF:8.844,
+	// media0.ts
+	// #EXT-X-CUE-OUT-CONT:ElapsedTime=8.844,Duration=15,SCTE35=/DAlAAAAAAAAAP/wFAUAAAABf+/+ANgNkv4AFJlwAAEBAQAA5xULLA==
+	// #EXTINF:6.156,
+	// media1.ts
+	// #EXT-X-CUE-IN
+	// #EXTINF:3.844,
+	// media2.ts
+}
+
+func ExampleMediaPlaylist_Segments_scte35_67_2014() {
+	f, _ := os.Open("sample-playlists/media-playlist-with-scte35.m3u8")
+	p, _, _ := DecodeFrom(bufio.NewReader(f), true)
+	pp := p.(*MediaPlaylist)
+	fmt.Print(pp)
+	// Output:
+	// #EXTM3U
+	// #EXT-X-VERSION:3
+	// #EXT-X-MEDIA-SEQUENCE:0
+	// #EXT-X-TARGETDURATION:10
+	// #EXTINF:10.000,
+	// media0.ts
+	// #EXTINF:10.000,
+	// media1.ts
+	// #EXT-SCTE35:CUE="/DAIAAAAAAAAAAAQAAZ/I0VniQAQAgBDVUVJQAAAAH+cAAAAAA==",ID="123",TIME=123.12
+	// #EXTINF:10.000,
+	// media2.ts
 }
 
 /****************
