@@ -198,6 +198,7 @@ type MediaSegment struct {
 	Map             *Map      // EXT-X-MAP displayed before the segment
 	Discontinuity   bool      // EXT-X-DISCONTINUITY indicates an encoding discontinuity between the media segment that follows it and the one that preceded it (i.e. file format, number and type of tracks, encoding parameters, encoding sequence, timestamp sequence)
 	SCTE            *SCTE     // SCTE-35 used for Ad signaling in HLS
+	DateRange       [][2]string // EXT-X-DATERANGE see https://tools.ietf.org/html/draft-pantos-http-live-streaming-21#section-4.3.2.7
 	ProgramDateTime time.Time // EXT-X-PROGRAM-DATE-TIME tag associates the first sample of a media segment with an absolute date and/or time
 }
 
@@ -284,6 +285,7 @@ type decodingState struct {
 	title              string
 	variant            *Variant
 	alternatives       []*Alternative
+	dateRange          [][2]string
 	xkey               *Key
 	xmap               *Map
 	scte               *SCTE

@@ -211,6 +211,13 @@ func decodeParamsLine(line string) map[string]string {
 	return out
 }
 
+func decodeParamsLineSlice(line string) (out [][2]string) {
+	for _, kv := range reKeyValue.FindAllStringSubmatch(line, -1) {
+		out = append(out, [2]string{kv[1], kv[2]})
+	}
+	return out
+}
+
 // Parse one line of master playlist.
 func decodeLineOfMasterPlaylist(p *MasterPlaylist, state *decodingState, line string, strict bool) error {
 	var err error
@@ -403,6 +410,12 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 				return err
 			}
 		}
+		if dateRange := state.dateRange; dateRange != nil {
+			state.dateRange = nil
+			if err = p.SetDateRange(dateRange); strict && err != nil {
+			  return err
+			}
+		}
 		if state.tagDiscontinuity {
 			state.tagDiscontinuity = false
 			if err = p.SetDiscontinuity(); strict && err != nil {
@@ -574,6 +587,8 @@ func decodeLineOfMediaPlaylist(p *MediaPlaylist, wv *WV, state *decodingState, l
 	case strings.HasPrefix(line, "#EXT-X-I-FRAMES-ONLY"):
 		state.listType = MEDIA
 		p.Iframe = true
+	case strings.HasPrefix(line, "#EXT-X-DATERANGE:"):
+		state.dateRange = decodeParamsLineSlice(line[17:])
 	case strings.HasPrefix(line, "#WV-AUDIO-CHANNELS"):
 		state.listType = MEDIA
 		if _, err = fmt.Sscanf(line, "#WV-AUDIO-CHANNELS %d", &wv.AudioChannels); strict && err != nil {

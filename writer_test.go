@@ -20,6 +20,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"golang.org/x/tools/go/gcimporter15/testdata"
+	"reflect"
 )
 
 // Check how master and media playlists implement common Playlist interface
@@ -234,6 +236,35 @@ func TestSetSCTEForMediaPlaylist(t *testing.T) {
 			t.Errorf("Test %+v did not contain: %q, playlist: %v", test, test.Expected, p.String())
 		}
 	}
+}
+
+func TestSetDateRangeForMediaPlaylist(t *testing.T) {
+	p, _ := NewMediaPlaylist(1, 2)
+	dateRange := [][2]string{
+			{"ID", "\"ad3\""},
+			{"START-DATE", "\"2016-06-13T11:15:00Z\""},
+			{"DURATION", "242"},
+			{"X-AD-ID", "\"1234\""},
+			{"X-AD-URL", "\"http://ad.com/acme\""},
+			{"SCTE35-OUT", "0xFC002F0000000000FF000014056FFFFFF000E011622DCAFF000052636200000000000A0008029896F50000008700000000"},
+		}
+	if err := p.SetDateRange(dateRange); err == nil {
+			t.Error("DateRange expected empty playlist error")
+		}
+	_ = p.Append("test01.ts", 10.0, "title")
+	if err := p.SetDateRange(dateRange); err != nil {
+			t.Errorf("DateRange did not expect error: %v", err)
+		}
+	if len(dateRange) != len(p.Segments[0].DateRange) {
+			t.Errorf("DateRange len must be equal\nexp: %d\ngot: %d", len(dateRange), len(p.Segments[0].DateRange))
+		}
+	for i, exp := range dateRange {
+			got := p.Segments[0].DateRange[i]
+			if !reflect.DeepEqual(exp, got) {
+				t.Errorf("DateRange\nexp: %#v\ngot: %#v", exp, got)
+			}
+		}
+	// fmt.Println(p)
 }
 
 // Create new media playlist
